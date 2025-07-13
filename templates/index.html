@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>六子棋</title>
+    <style>
+        #gameContainer {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-family: Arial, sans-serif;
+        }
+        #roomControls {
+            margin: 20px;
+            text-align: center;
+        }
+        #gameBoard {
+            position: relative;
+            margin: 20px auto;
+            background-color: #DEB887;
+            display: none;
+        }
+        .grid-line {
+            position: absolute;
+            background-color: #000;
+        }
+        .vertical {
+            width: 1px;
+            height: 100%;
+        }
+        .horizontal {
+            width: 100%;
+            height: 1px;
+        }
+        .piece {
+            position: absolute;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            cursor: pointer;
+        }
+        #status {
+            text-align: center;
+            margin: 20px;
+            font-size: 20px;
+        }
+        input, button {
+            margin: 5px;
+            padding: 5px 10px;
+            font-size: 16px;
+        }
+        button {
+            cursor: pointer;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <div id="gameContainer">
+        <div id="roomControls">
+            <div id="createRoom">
+                <input type="text" id="newRoomId" placeholder="输入房间ID">
+                <button onclick="createRoom()">创建房间</button>
+            </div>
+            <div id="joinRoom">
+                <input type="text" id="roomToJoin" placeholder="输入要加入的房间ID">
+                <button onclick="joinRoom()">加入房间</button>
+            </div>
+        </div>
+        <div id="status">请创建或加入一个房间</div>
+        <canvas id="gameBoard" width="800" height="800"></canvas>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script>
+        const BOARD_SIZE = 19;
+        const CELL_SIZE = 40;
+        const PIECE_RADIUS = 18;
+        const MARGIN = 20; // 边距，确保边缘棋子完全可见
+
+        const canvas = document.getElementById('gameBoard');
+        const ctx = canvas.getContext('2d');
+        const statusDiv = document.getElementById('status');
+
+        let myPlayerNumber = null;
+        let currentPlayer = 1;
+        let movesCount = 0;
+        let currentMoveCount = 0;
+        let gameStarted = false;
+        let currentRoomId = null;
+        let gameBoard = Array(19).fill().map(() => Array(19).fill(0)); // 跟踪棋盘状态
+
+        // 生成唯一玩家ID
+        const playerId = Math.random().toString(36).substr(2, 9);
+
+        // 连接WebSocket
+        const socket = io();
+
+        function createRoom() {
+            const roomId = document.getElementById('newRoomId').value.trim();
+            if (roomId) {
+                socket.emit('create_room', { room_id: roomId, player_id: playerId });
+            } else {
+                alert('请输入房间ID');
+            }
+        }
+
+        function joinRoom() {
+            const roomId = document.getElementById('roomToJoin').value.trim();
+            if (roomId) {
+                socket.emit('join_room', { room_id: roomId, player_id: playerId });
+            } else {
+                alert('请输入房间ID');
+            }
+        }
+
+        // 绘制棋盘
+        function drawBoard() {
+            ctx.fillStyle = '#DEB887';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.strokeStyle = '#000';
+            ctx.lineWidth = 1;
+
+            // 绘制网格线
+            for (let i = 0; i < BOARD_SIZE; i++) {
+                const pos = MARGIN + i * CELL_SIZE;
+                // 垂直线
+                ctx.beginPath();
+                ctx.moveTo(pos, MARGIN);
+                ctx.lineTo(pos, MARGIN + (BOARD_SIZE - 1) * CELL_SIZE);
+                ctx.stroke();
+                // 水平线
+                ctx.beginPath();
+                ctx.moveTo(MARGIN, pos);
+                ctx.lineTo(MARGIN + (BOARD_SIZE - 1) * CELL_SIZE, pos);
+                ctx.stroke();
+            }
+        }
+
+        // 绘制棋子
+        function drawPiece(x, y, player, isWinning = false) {
+            const xPos = MARGIN + x * CELL_SIZE;
+            const yPos = MARGIN + y * CELL_SIZE;
+
+            ctx.beginPath();
+            ctx.arc(xPos, yPos, PIECE_RADIUS, 0, 2 * Math.PI);
+            ctx.fillStyle = player === 1 ? '#000' : '#fff';
+            ctx.fill();
+            
+            if (player === 2) {
+                ctx.strokeStyle = '#000';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+            }
+            
+            // 如果是获胜连珠，添加高亮效果
+            if (isWinning) {
+                ctx.beginPath();
+                ctx.arc(xPos, yPos, PIECE_RADIUS + 3, 0, 2 * Math.PI);
+                ctx.strokeStyle = '#ff0000';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+            }
+        }
+        
+        // 高亮获胜连珠
+        function highlightWinLine(winLine) {
+            winLine.forEach(pos => {
+                const [x, y] = pos;
+                const player = gameBoard[y][x];
+                drawPiece(x, y, player, true);
+            });
+        }
+
+        // 处理点击事件
+        canvas.addEventListener('click', function(event) {
+            if (!gameStarted || currentPlayer !== myPlayerNumber) return;
+
+            const rect = canvas.getBoundingClientRect();
+            const x = Math.round((event.clientX - rect.left - MARGIN) / CELL_SIZE);
+            const y = Math.round((event.clientY - rect.top - MARGIN) / CELL_SIZE);
+
+            if (x >= 0 && x < BOARD_SIZE && y >= 0 && y < BOARD_SIZE) {
+                socket.emit('move', { 
+                    player_id: playerId,
+                    room_id: currentRoomId,
+                    x: x,
+                    y: y
+                });
+            }
+        });
+
+        // WebSocket事件处理
+        socket.on('connect', function() {
+            console.log('Connected to server');
+        });
+
+        socket.on('room_created', function(data) {
+            currentRoomId = data.room_id;
+            myPlayerNumber = data.player_number;
+            statusDiv.textContent = `已创建房间 ${currentRoomId}，等待对手加入...`;
+            canvas.style.display = 'block';
+            drawBoard();
+        });
+
+        socket.on('player_joined', function(data) {
+            myPlayerNumber = data.player_number;
+            statusDiv.textContent = `已加入房间，你是${myPlayerNumber === 1 ? '黑' : '白'}棋`;
+            canvas.style.display = 'block';
+            drawBoard();
+        });
+
+        socket.on('room_full', function() {
+            alert('该房间已满');
+        });
+
+        socket.on('room_not_found', function() {
+            alert('找不到该房间');
+        });
+
+        socket.on('room_exists', function() {
+            alert('房间已存在，请选择其他房间ID');
+        });
+
+        socket.on('game_start', function(data) {
+            gameStarted = true;
+            currentPlayer = data.current_player;
+            updateStatus();
+        });
+
+        socket.on('move_made', function(data) {
+            gameBoard[data.y][data.x] = data.player;
+            drawPiece(data.x, data.y, data.player);
+            currentPlayer = data.current_player;
+            movesCount = data.moves_count;
+            currentMoveCount = data.current_move_count;
+            updateStatus();
+        });
+
+        socket.on('game_over', function(data) {
+            gameStarted = false;
+            statusDiv.textContent = `游戏结束！${data.winner === 1 ? '黑' : '白'}棋获胜！`;
+            
+            // 高亮获胜连珠
+            if (data.win_line) {
+                setTimeout(() => {
+                    highlightWinLine(data.win_line);
+                }, 100);
+            }
+        });
+
+        function updateStatus() {
+            if (!gameStarted) return;
+            if (currentPlayer === myPlayerNumber) {
+                if (movesCount === 0) {
+                    statusDiv.textContent = '你的回合：请下一子（黑棋首步）';
+                } else {
+                    const remainingMoves = 2 - currentMoveCount;
+                    statusDiv.textContent = `你的回合：还可以下${remainingMoves}子`;
+                }
+            } else {
+                statusDiv.textContent = '等待对手下子';
+            }
+        }
+    </script>
+</body>
+</html>
